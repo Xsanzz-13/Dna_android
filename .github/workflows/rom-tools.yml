@@ -9,11 +9,17 @@ on:
         type: choice
         options:
           - check-tools
-          - unpack
-          - repack
           - resize
-          - convert
         default: check-tools
+      image_url:
+        description: "Direct download URL image (untuk resize)"
+        required: false
+        type: string
+      resize_mb:
+        description: "Tambahan ukuran image dalam MiB"
+        required: false
+        type: string
+        default: "200"
 
 permissions:
   contents: read
@@ -29,24 +35,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git curl wget unzip zip \
-            python3 python3-pip \
-            android-sdk-libsparse-utils \
-            e2fsprogs erofs-utils f2fs-tools \
-            device-tree-compiler lz4 zstd \
-            brotli p7zip-full
+            curl file e2fsprogs android-sdk-libsparse-utils
 
       - name: Check tools
         if: inputs.action == 'check-tools'
         run: bash scripts/check-tools.sh
 
-      - name: Validate operation
-        run: |
-          case "${{ inputs.action }}" in
-            check-tools) ;;
-            unpack|repack|resize|convert)
-              echo "::notice::Operasi dipilih: ${{ inputs.action }}"
-              echo "::notice::Implementasi operasi menunggu skrip dan format input."
-              ;;
-            *) echo "::error::Operasi tidak dikenal"; exit 1 ;;
-          esac
+      - name: Resize image
+        if: inputs.action == 'resize'
+        env:
+          IMAGE_URL: ${{ inputs.image_url }}
+          RESIZE_MB: ${{ inputs.resize_mb }}
+        run: bash scripts/resize-image.sh
+
+      - name: Upload result
+        if: success() && inputs.action == 'resize'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dna-resized-image
+          path: output/resized.img
+          if-no-files-found: error
+          retention-days: 3
