@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           mkdir -p output
           source config/firmware.env
-          curl -fL --retry 3 --retry-delay 5 -o output/firmware.zip ""
+          curl -fL --retry 3 --retry-delay 5 -o output/firmware.zip "$FIRMWARE_URL"
           file output/firmware.zip
           file output/firmware.zip | grep -qi 'zip archive' || { echo "::error::Download bukan ZIP yang valid"; exit 1; }
 
