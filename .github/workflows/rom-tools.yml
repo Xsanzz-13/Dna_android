@@ -73,6 +73,14 @@ jobs:
           run-id: 40069923513
           github-token: ${{ github.token }}
 
+      - name: Diagnose firmware ZIP
+        if: inputs.action == 'extract-firmware'
+        run: |
+          set -euo pipefail
+          ls -lh output/firmware.zip
+          stat -c 'Size: %s bytes' output/firmware.zip
+          unzip -tq output/firmware.zip
+
       - name: Extract Samsung firmware
         if: inputs.action == 'extract-firmware'
         run: |
