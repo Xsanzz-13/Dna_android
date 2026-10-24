@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - check-tools
+          - download-firmware
           - resize
         default: check-tools
       image_url:
@@ -40,6 +41,25 @@ jobs:
       - name: Check tools
         if: inputs.action == 'check-tools'
         run: bash scripts/check-tools.sh
+
+      - name: Download Samsung firmware
+        if: inputs.action == 'download-firmware'
+        run: |
+          set -euo pipefail
+          source config/firmware.env
+          mkdir -p output
+          curl -fL --retry 3 --retry-delay 5 -o output/firmware.zip "$FIRMWARE_URL"
+          file output/firmware.zip
+          file output/firmware.zip | grep -qi 'zip archive' || { echo "::error::Download bukan ZIP yang valid"; exit 1; }
+
+      - name: Upload firmware
+        if: success() && inputs.action == 'download-firmware'
+        uses: actions/upload-artifact@v4
+        with:
+          name: samsung-firmware
+          path: output/firmware.zip
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Resize image
         if: inputs.action == 'resize'
