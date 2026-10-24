@@ -11,12 +11,26 @@ on:
           - check-tools
           - download-firmware
           - extract-firmware
+          - raw-to-sparse
+          - sparse-to-raw
+          - zstd-compress
+          - zstd-decompress
           - resize
         default: check-tools
       image_url:
-        description: "Direct download URL image (untuk resize)"
+        description: "Direct download URL image (konversi, ZSTD, atau resize)"
         required: false
         type: string
+      image_name:
+        description: "Nama file input (contoh: system.img atau vendor.img.zst)"
+        required: false
+        type: string
+        default: "input.img"
+      zstd_level:
+        description: "Level kompresi ZSTD (1-19)"
+        required: false
+        type: string
+        default: "3"
       resize_mb:
         description: "Tambahan ukuran image dalam MiB"
         required: false
@@ -36,9 +50,10 @@ jobs:
 
       - name: Install dependencies
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            curl file e2fsprogs android-sdk-libsparse-utils
+            curl file unzip e2fsprogs android-sdk-libsparse-utils zstd
 
       - name: Check tools
         if: inputs.action == 'check-tools'
@@ -85,8 +100,6 @@ jobs:
         if: inputs.action == 'extract-firmware'
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y unzip
           mkdir -p output/firmware
           file output/firmware.zip
           file output/firmware.zip | grep -qi 'zip archive' || { echo "::error::Download bukan ZIP yang valid"; exit 1; }
@@ -104,6 +117,69 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Download image for conversion or ZSTD
+        if: contains(fromJSON('["raw-to-sparse","sparse-to-raw","zstd-compress","zstd-decompress"]'), inputs.action)
+        env:
+          IMAGE_URL: ${{ inputs.image_url }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_URL" =~ ^https?:// ]] || { echo "::error::Isi URL HTTP(S) image"; exit 1; }
+          [[ "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Nama file hanya boleh berisi huruf, angka, titik, garis bawah, dan strip"; exit 1; }
+          mkdir -p work output
+          curl -fL --retry 3 --connect-timeout 20 --max-time 1800 "$IMAGE_URL" -o "work/$IMAGE_NAME"
+          test -s "work/$IMAGE_NAME"
+          file "work/$IMAGE_NAME"
+          sha256sum "work/$IMAGE_NAME"
+
+      - name: Convert or process ZSTD
+        if: contains(fromJSON('["raw-to-sparse","sparse-to-raw","zstd-compress","zstd-decompress"]'), inputs.action)
+        env:
+          ACTION: ${{ inputs.action }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          ZSTD_LEVEL: ${{ inputs.zstd_level }}
+        run: |
+          set -euo pipefail
+          INPUT="work/$IMAGE_NAME"
+          mkdir -p output
+          case "$ACTION" in
+            raw-to-sparse)
+              OUTPUT="output/${IMAGE_NAME%.*}.sparse.img"
+              img2simg "$INPUT" "$OUTPUT"
+              ;;
+            sparse-to-raw)
+              OUTPUT="output/${IMAGE_NAME%.*}.raw.img"
+              simg2img "$INPUT" "$OUTPUT"
+              ;;
+            zstd-compress)
+              [[ "$ZSTD_LEVEL" =~ ^([1-9]|1[0-9])$ ]] || { echo "::error::Level ZSTD harus 1-19"; exit 1; }
+              OUTPUT="output/$IMAGE_NAME.zst"
+              zstd "-$ZSTD_LEVEL" -T0 -f "$INPUT" -o "$OUTPUT"
+              ;;
+            zstd-decompress)
+              OUTPUT="output/${IMAGE_NAME%.*}"
+              zstd -d -f "$INPUT" -o "$OUTPUT"
+              ;;
+            *)
+              echo "::error::Operasi tidak dikenal"
+              exit 1
+              ;;
+          esac
+          test -s "$OUTPUT"
+          echo "Output: $OUTPUT"
+          file "$OUTPUT"
+          ls -lh "$OUTPUT"
+          sha256sum "$OUTPUT"
+
+      - name: Upload conversion or ZSTD result
+        if: success() && contains(fromJSON('["raw-to-sparse","sparse-to-raw","zstd-compress","zstd-decompress"]'), inputs.action)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dna-image-result
+          path: output/*
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Resize image
         if: inputs.action == 'resize'
         env:
@@ -111,11 +187,11 @@ jobs:
           RESIZE_MB: ${{ inputs.resize_mb }}
         run: bash scripts/resize-image.sh
 
-      - name: Upload result
+      - name: Upload resized image
         if: success() && inputs.action == 'resize'
         uses: actions/upload-artifact@v4
         with:
           name: dna-resized-image
           path: output/resized.img
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 90
