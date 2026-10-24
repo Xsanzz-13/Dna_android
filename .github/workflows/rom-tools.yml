@@ -10,6 +10,7 @@ on:
         options:
           - check-tools
           - download-firmware
+          - extract-firmware
           - resize
         default: check-tools
       image_url:
@@ -58,6 +59,31 @@ jobs:
         with:
           name: samsung-firmware
           path: output/firmware.zip
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Extract Samsung firmware
+        if: inputs.action == 'extract-firmware'
+        run: |
+          set -euo pipefail
+          source config/firmware.env
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir -p output/firmware
+          curl -fL --retry 3 --retry-delay 5 -o output/firmware.zip "$FIRMWARE_URL"
+          file output/firmware.zip
+          file output/firmware.zip | grep -qi 'zip archive' || { echo "::error::Download bukan ZIP yang valid"; exit 1; }
+          unzip -o output/firmware.zip -d output/firmware
+          find output/firmware -type f -printf "%P\t%s bytes\n" | tee output/firmware-contents.txt
+
+      - name: Upload extracted firmware
+        if: success() && inputs.action == 'extract-firmware'
+        uses: actions/upload-artifact@v4
+        with:
+          name: samsung-firmware-extracted
+          path: |
+            output/firmware/
+            output/firmware-contents.txt
           if-no-files-found: error
           retention-days: 3
 
