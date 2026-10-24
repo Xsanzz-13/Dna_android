@@ -24,6 +24,7 @@ on:
         default: "200"
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -47,9 +48,7 @@ jobs:
         if: inputs.action == 'download-firmware'
         run: |
           set -euo pipefail
-          source config/firmware.env
           mkdir -p output
-          curl -fL --retry 3 --retry-delay 5 -o output/firmware.zip "$FIRMWARE_URL"
           file output/firmware.zip
           file output/firmware.zip | grep -qi 'zip archive' || { echo "::error::Download bukan ZIP yang valid"; exit 1; }
 
@@ -62,15 +61,23 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Download previous firmware artifact
+        if: inputs.action == 'extract-firmware'
+        uses: actions/download-artifact@v4
+        with:
+          name: samsung-firmware
+          path: output
+          repository: ${{ github.repository }}
+          run-id: 40069923513
+          github-token: ${{ github.token }}
+
       - name: Extract Samsung firmware
         if: inputs.action == 'extract-firmware'
         run: |
           set -euo pipefail
-          source config/firmware.env
           sudo apt-get update
           sudo apt-get install -y unzip
           mkdir -p output/firmware
-          curl -fL --retry 3 --retry-delay 5 -o output/firmware.zip "$FIRMWARE_URL"
           file output/firmware.zip
           file output/firmware.zip | grep -qi 'zip archive' || { echo "::error::Download bukan ZIP yang valid"; exit 1; }
           unzip -o output/firmware.zip -d output/firmware
@@ -85,7 +92,7 @@ jobs:
             output/firmware/
             output/firmware-contents.txt
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 90
 
       - name: Resize image
         if: inputs.action == 'resize'
